@@ -1,0 +1,86 @@
+/* データのシミュレーション */
+data df;
+	call streaminit(12345); /* シード値の指定 */
+	keep ID Gender Age Press TG;
+	N=5000; /* サンプルサイズの指定 */
+	do i=1 to N;
+/* 変数の生成 */
+		ID =
+		Gender = rand('BINORM',0.5,1); 
+		Age = round(20+45*rand('UNIFORM'),1);
+			if Gender=0 then Press = round(rand('NORMAL',100,20)+0.6*Age,1);
+			if Gender=1 then Press = round(rand('NORMAL',110,20)+0.6*Age,1);
+		TG = round(rand('NORMAL',90,15) +0.6*Age + 10*Gender,1);
+		output;
+		end;
+run;
+/* t=0での治療変数の追加 */
+data df;
+	set df;
+	call streaminit(12345); /* シード値の指定 */
+	keep ID Trt0 Gender Age Press TG;
+	PS0_True=logistic(0.5+0.8*Gender-0.03*Age);/* t=0での真の傾向スコアモデル */
+	Trt0 = rand('BINOMINAL',PS0_True,1);
+run;
+/* t=1での治療変数、アウトカムの追加 */
+data df;
+	set df;
+	call streaminit(12345); /* シード値の指定 */
+	keep ID Trt0 Trt1 Outcome Gender Age Press TG;
+	PS1_True=logistic(0.6-0.4*Gender-0.01*Age+0.5*Trt0+0.01*Press-0.015*TG);/* t=0での真の傾向スコアモデル */
+	Trt1 = rand('BINOMINAL',PS1_True,1);
+	epsilon = rand('NORMAL',0,10);
+	Outcome = round(130 - 10*Trt0 - 4*Trt1 +Gender +Age +Press+ TG+ epsilon,1);
+run;
+/* 変数の順序変更 */
+data df;
+   format ID Trt0 Trt1 Outcome Gender Age Press TG;
+   set df;
+run;
+
+
+
+
+/*各時点の傾向スコアの算出*/
+/*t=0*/
+proc logistic data=df descending;
+	class Gender(ref="0") /param=ref ref=first;
+	model Trt0=Gender Age;
+	output out=df predicted=PS0;
+run;
+/*t=1*/
+proc logistic data=df descending;
+	class Gender(ref="0")/param=ref ref=first;
+	model Trt1=Gender Age Trt0 Press TG;
+	output out=df predicted=PS1;
+run;
+
+
+/*SWの分子の計算*/
+proc logistic data=df descending;
+model Trt0=;
+output out=df predicted=Pr0;
+run;
+proc logistic data=df descending;
+class Trt0/param=ref ref=first;
+model Trt1=Trt0;
+output out=df predicted=Pr1;
+run;
+
+
+/*各個人のweightの計算*/
+data df_wt;
+set df;
+if Trt0=1 then wt0=Pr0/PS0; else wt0=(1-Pr0)/(1-PS0);
+if Trt1=1 then wt1=Pr1/PS1; else wt1=(1-Pr1)/(1-PS1);
+wt=wt0*wt1;
+run;
+
+
+/*因果パラメータの推定*/
+proc genmod data=df_wt;
+class ID Trt0 Trt1/param=ref ref=first;
+model Outcome = Trt0 Trt1/ error=normal link=id;
+weight wt;
+repeated subject=ID/ type=ind;
+run;
