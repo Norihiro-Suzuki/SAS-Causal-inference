@@ -5,7 +5,7 @@ data df;
 	N=5000; /* サンプルサイズの指定 */
 	do i=1 to N;
 /* 変数の生成 */
-		ID =
+		ID = i;
 		Gender = rand('BINORM',0.5,1); 
 		Age = round(20+45*rand('UNIFORM'),1);
 			if Gender=0 then Press = round(rand('NORMAL',100,20)+0.6*Age,1);
